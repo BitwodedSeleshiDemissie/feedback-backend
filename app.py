@@ -1,49 +1,42 @@
-from flask import Flask, request, jsonify
-import os
-import psycopg2
+from flask import Flask, render_template, request, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
 
-# Get the DATABASE_URL from environment variables
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is not set")
+# Use SQLite for local deployment (this file will be created in the root of your project)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///feedback.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
-conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-cursor = conn.cursor()
+# Define the Feedback model
+class Feedback(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(120), nullable=False)
+    subject = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.Text, nullable=False)
 
-# Create a table for contact requests (run only once)
-with conn:
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS contact_requests (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255),
-        email VARCHAR(255),
-        message TEXT,
-        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-@app.route('/contact', methods=['POST'])
-def contact():
-    data = request.get_json()
-    name = data.get('name')
-    email = data.get('email')
-    message = data.get('message')
+@app.route('/submit', methods=['POST'])
+def submit_feedback():
+    if request.method == 'POST':
+        name = request.form['name']
+        email = request.form['email']
+        subject = request.form['subject']
+        message = request.form['message']
 
-    if not name or not email or not message:
-        return jsonify({"error": "All fields are required"}), 400
+        feedback = Feedback(name=name, email=email, subject=subject, message=message)
+        db.session.add(feedback)
+        db.session.commit()
+        return redirect(url_for('thank_you'))
 
-    # Insert the data into the database
-    try:
-        with conn:
-            cursor.execute(
-                "INSERT INTO contact_requests (name, email, message) VALUES (%s, %s, %s)",
-                (name, email, message)
-            )
-        return jsonify({"status": "success"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+@app.route('/thank-you')
+def thank_you():
+    return 'Thank you for your feedback!'
 
 if __name__ == '__main__':
+    db.create_all()  # Creates the SQLite database and tables
     app.run(debug=True)
